@@ -207,10 +207,80 @@ Convert this instruction into Minecraft bot commands:`;
             }
             break;
           case 'dig':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const Vec3 = require('vec3').Vec3;
+                const targetPos = new Vec3(
+                  Math.floor(processedArgs.x), 
+                  Math.floor(processedArgs.y), 
+                  Math.floor(processedArgs.z)
+                );
+                const block = bot.bot.blockAt(targetPos);
+                
+                if (block && block.name !== 'air') {
+                  // Use callback-based dig to avoid crashing
+                  bot.bot.dig(block, (err: any) => {
+                    if (err) {
+                      console.log('Dig completed with minor error:', err.message);
+                    }
+                  });
+                  result = { success: true, data: { block: block.name, position: targetPos } };
+                } else {
+                  result = { success: false, error: 'No block to dig at that location' };
+                }
+              } else {
+                result = { success: false, error: 'Bot not available or disconnected' };
+              }
+            } catch (error) {
+              result = { success: false, error: `Dig failed: ${(error as Error).message}` };
+            }
+            break;
           case 'place':
+            // Place is complex and can crash bots, so keep it disabled for now
+            result = { success: false, error: 'Place command disabled - use dig and movement for now' };
+            break;
           case 'inventory':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const items = bot.bot.inventory.items().map(item => ({
+                  name: item.name,
+                  displayName: item.displayName,
+                  count: item.count,
+                  slot: item.slot
+                }));
+                result = { success: true, data: { items, totalItems: items.length } };
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: (error as Error).message };
+            }
+            break;
           case 'status':
-            result = { success: false, error: 'Command not yet implemented in AI mode' };
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const pos = bot.bot.entity.position;
+                const status = {
+                  position: { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) },
+                  health: bot.bot.health,
+                  food: bot.bot.food,
+                  experience: bot.bot.experience,
+                  gameMode: bot.bot.game.gameMode,
+                  dimension: bot.bot.game.dimension,
+                  time: bot.bot.time.timeOfDay,
+                  weather: {
+                    raining: bot.bot.isRaining,
+                    thundering: bot.bot.thunderState > 0
+                  },
+                  inventorySlots: bot.bot.inventory.items().length
+                };
+                result = { success: true, data: status };
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: (error as Error).message };
+            }
             break;
           default:
             result = { success: false, error: `Unknown command: ${cmd.command}` };
