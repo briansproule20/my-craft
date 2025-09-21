@@ -4,7 +4,9 @@
       "Bash(npx echo-start:*)",
       "Bash(pnpm run dev:*)",
       "Bash(pnpm install:*)",
-      "Bash(git clone:*)"
+      "Bash(git clone:*)",
+      "Bash(pnpm add:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []
