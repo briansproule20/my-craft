@@ -10,7 +10,11 @@ Available Commands:
 - move <x> <y> <z> - Move to coordinates
 - look <yaw> <pitch> - Look in direction (yaw: 0-360, pitch: -90 to 90)
 - attack - Attack nearby mobs
-- dig <x> <y> <z> - Dig block at coordinates
+- dig <x> <y> <z> - Dig single block at coordinates
+- digHere - Dig the block directly in front of the bot
+- digBelow - Dig the block directly below the bot
+- moveTo <x> <y> <z> - Move to position then continue next command
+- lookAt <x> <y> <z> - Look at specific coordinates
 - place <x> <y> <z> <blockName> - Place block at coordinates
 - inventory - Check inventory
 - status - Get bot status
@@ -27,19 +31,26 @@ Examples:
 User: "Go forward 5 blocks"
 Response: [{"command": "move", "args": {"x": "current.x", "y": "current.y", "z": "current.z + 5"}}]
 
-User: "Say hello and then attack any mobs nearby"
+User: "Dig the block in front of you"
+Response: [{"command": "digHere", "args": {}}]
+
+User: "Dig below your feet"
+Response: [{"command": "digBelow", "args": {}}]
+
+User: "Look at that mountain and move there"
 Response: [
-  {"command": "chat", "args": {"message": "Hello everyone!"}},
-  {"command": "attack", "args": {}}
+  {"command": "lookAt", "args": {"x": "current.x + 20", "y": "current.y + 10", "z": "current.z + 5"}},
+  {"command": "moveTo", "args": {"x": "current.x + 20", "y": "current.y + 10", "z": "current.z + 5"}}
 ]
 
-User: "Dig a 2x2 hole in front of me"
+User: "Move forward, then dig the block in front"
 Response: [
-  {"command": "dig", "args": {"x": "current.x + 1", "y": "current.y - 1", "z": "current.z"}},
-  {"command": "dig", "args": {"x": "current.x + 2", "y": "current.y - 1", "z": "current.z"}},
-  {"command": "dig", "args": {"x": "current.x + 1", "y": "current.y - 1", "z": "current.z + 1"}},
-  {"command": "dig", "args": {"x": "current.x + 2", "y": "current.y - 1", "z": "current.z + 1"}}
+  {"command": "moveTo", "args": {"x": "current.x + 1", "y": "current.y", "z": "current.z"}},
+  {"command": "digHere", "args": {}}
 ]
+
+User: "Dig that specific block"
+Response: [{"command": "dig", "args": {"x": "current.x + 2", "y": "current.y", "z": "current.z + 1"}}]
 
 Always respond with valid JSON array of commands, or ask for clarification if the instruction is ambiguous.`;
 
@@ -233,6 +244,101 @@ Convert this instruction into Minecraft bot commands:`;
               }
             } catch (error) {
               result = { success: false, error: `Dig failed: ${(error as Error).message}` };
+            }
+            break;
+          case 'digHere':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const pos = bot.bot.entity.position;
+                const yaw = bot.bot.entity.yaw;
+                
+                // Calculate block in front of bot
+                const dx = -Math.sin(yaw);
+                const dz = -Math.cos(yaw);
+                
+                const Vec3 = require('vec3').Vec3;
+                const targetPos = new Vec3(
+                  Math.floor(pos.x + dx), 
+                  Math.floor(pos.y), 
+                  Math.floor(pos.z + dz)
+                );
+                const block = bot.bot.blockAt(targetPos);
+                
+                if (block && block.name !== 'air') {
+                  bot.bot.dig(block, (err: any) => {
+                    if (err) console.log('DigHere error:', err.message);
+                  });
+                  result = { success: true, data: { block: block.name, position: targetPos } };
+                } else {
+                  result = { success: false, error: 'No block in front to dig' };
+                }
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: `DigHere failed: ${(error as Error).message}` };
+            }
+            break;
+          case 'digBelow':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const pos = bot.bot.entity.position;
+                const Vec3 = require('vec3').Vec3;
+                const targetPos = new Vec3(Math.floor(pos.x), Math.floor(pos.y - 1), Math.floor(pos.z));
+                const block = bot.bot.blockAt(targetPos);
+                
+                if (block && block.name !== 'air') {
+                  bot.bot.dig(block, (err: any) => {
+                    if (err) console.log('DigBelow error:', err.message);
+                  });
+                  result = { success: true, data: { block: block.name, position: targetPos } };
+                } else {
+                  result = { success: false, error: 'No block below to dig' };
+                }
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: `DigBelow failed: ${(error as Error).message}` };
+            }
+            break;
+          case 'lookAt':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const targetX = processedArgs.x;
+                const targetY = processedArgs.y;
+                const targetZ = processedArgs.z;
+                const Vec3 = require('vec3').Vec3;
+                const target = new Vec3(targetX, targetY, targetZ);
+                
+                await bot.bot.lookAt(target);
+                result = { success: true, data: { lookedAt: { x: targetX, y: targetY, z: targetZ } } };
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: `LookAt failed: ${(error as Error).message}` };
+            }
+            break;
+          case 'moveTo':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const targetX = processedArgs.x;
+                const targetY = processedArgs.y; 
+                const targetZ = processedArgs.z;
+                
+                // Use pathfinder to move to position
+                const Vec3 = require('vec3').Vec3;
+                const goals = require('mineflayer-pathfinder').goals;
+                await bot.bot.pathfinder.goto(new goals.GoalBlock(targetX, targetY, targetZ));
+                
+                result = { success: true, data: { movedTo: { x: targetX, y: targetY, z: targetZ } } };
+                currentPos = { x: targetX, y: targetY, z: targetZ };
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: `MoveTo failed: ${(error as Error).message}` };
             }
             break;
           case 'place':
