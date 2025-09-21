@@ -247,4 +247,13 @@ class BotManager {
 }
 
 // Singleton instance
-export const botManager = new BotManager();
+// Make bot manager persistent across Next.js hot reloads
+declare global {
+  var __botManagerInstance: BotManager | undefined;
+}
+
+export const botManager = globalThis.__botManagerInstance ?? new BotManager();
+
+if (process.env.NODE_ENV === 'development') {
+  globalThis.__botManagerInstance = botManager;
+}
