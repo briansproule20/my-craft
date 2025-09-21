@@ -6,7 +6,9 @@
       "Bash(pnpm install:*)",
       "Bash(git clone:*)",
       "Bash(pnpm add:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Read(//Users/briansproule/**)",
+      "Bash(PORT=3000 pnpm run dev)"
     ],
     "deny": [],
     "ask": []

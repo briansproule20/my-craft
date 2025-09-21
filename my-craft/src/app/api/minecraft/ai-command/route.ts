@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { botManager } from '@/lib/bot-manager';
+import { generateText } from 'ai';
+import { openai } from '@/echo';
 
 const MINECRAFT_COMMAND_SYSTEM_PROMPT = `You are a Minecraft bot command translator. Your job is to convert natural language instructions into a series of executable Minecraft bot commands.
 
@@ -54,10 +56,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Get bot current status for context
+    console.log('AI Command - Looking for botId:', botId);
+    console.log('AI Command - All bots:', botManager.getAllBots().map(b => ({ id: b.id, status: b.status, hasBot: !!b.bot })));
+
     const bot = botManager.getBot(botId);
+    console.log('AI Command - Found bot:', bot ? { id: bot.id, status: bot.status, hasBot: !!bot.bot } : 'null');
+
     if (!bot || !bot.bot) {
       return NextResponse.json(
-        { error: 'Bot not found or not connected' },
+        {
+          error: 'Bot not found or not connected',
+          debug: {
+            botId,
+            botFound: !!bot,
+            botHasMinecraftBot: bot ? !!bot.bot : false,
+            allBots: botManager.getAllBots().map(b => ({ id: b.id, status: b.status }))
+          }
+        },
         { status: 404 }
       );
     }
@@ -78,39 +93,31 @@ User Instruction: "${instruction}"
 
 Convert this instruction into Minecraft bot commands:`;
 
-    // Call Echo LLM API
-    const aiResponse = await fetch(`${process.env.NEXT_PUBLIC_ECHO_API_URL || 'https://api.echo.dev'}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ECHO_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4',
-        messages: [
-          { role: 'system', content: MINECRAFT_COMMAND_SYSTEM_PROMPT },
-          { role: 'user', content: contextPrompt }
-        ],
+    // Use Echo AI SDK integration
+    let aiContent: string;
+    try {
+      const result = await generateText({
+        model: openai('gpt-4o'),
+        system: MINECRAFT_COMMAND_SYSTEM_PROMPT,
+        prompt: contextPrompt,
         temperature: 0.3,
-        max_tokens: 1000
-      })
-    });
+        maxTokens: 1000,
+      });
 
-    if (!aiResponse.ok) {
-      console.error('Echo API error:', await aiResponse.text());
+      aiContent = result.text;
+
+      if (!aiContent) {
+        return NextResponse.json(
+          { error: 'No response from AI' },
+          { status: 500 }
+        );
+      }
+
+    } catch (error) {
+      console.error('Echo API error:', error);
       return NextResponse.json(
         { error: 'AI service unavailable' },
         { status: 503 }
-      );
-    }
-
-    const aiData = await aiResponse.json();
-    const aiContent = aiData.choices[0]?.message?.content;
-
-    if (!aiContent) {
-      return NextResponse.json(
-        { error: 'No response from AI' },
-        { status: 500 }
       );
     }
 
