@@ -393,6 +393,9 @@ interface ManageBotsViewProps {
 
 function ManageBotsView({ bots, selectedBot, onSelectBot, onStopBot, onRetryBot, loading }: ManageBotsViewProps) {
   const [message, setMessage] = useState('');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiProcessing, setAiProcessing] = useState(false);
+  const [aiResults, setAiResults] = useState<any>(null);
 
   const sendChat = async (botId: string) => {
     if (!message.trim()) return;
@@ -410,6 +413,39 @@ function ManageBotsView({ bots, selectedBot, onSelectBot, onStopBot, onRetryBot,
       setMessage('');
     } catch (error) {
       console.error('Error sending chat:', error);
+    }
+  };
+
+  const sendAiInstruction = async (botId: string) => {
+    if (!aiInstruction.trim()) return;
+
+    setAiProcessing(true);
+    setAiResults(null);
+
+    try {
+      const response = await fetch('/api/minecraft/ai-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          botId,
+          instruction: aiInstruction
+        })
+      });
+
+      const data = await response.json();
+      setAiResults(data);
+
+      if (data.success) {
+        setAiInstruction('');
+      }
+    } catch (error) {
+      console.error('Error sending AI instruction:', error);
+      setAiResults({
+        success: false,
+        error: 'Failed to process instruction'
+      });
+    } finally {
+      setAiProcessing(false);
     }
   };
 
@@ -610,10 +646,86 @@ function ManageBotsView({ bots, selectedBot, onSelectBot, onStopBot, onRetryBot,
               )}
             </div>
 
+            {/* AI Instructions */}
+            {selectedBotData.connected && (
+              <div className="bg-white rounded-lg shadow-sm border p-6">
+                <h4 className="font-semibold text-gray-900 mb-4 flex items-center">
+                  🤖 AI Instructions
+                  <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Powered by Echo</span>
+                </h4>
+                <div className="space-y-4">
+                  <div>
+                    <textarea
+                      value={aiInstruction}
+                      onChange={(e) => setAiInstruction(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && sendAiInstruction(selectedBotData.botId)}
+                      placeholder="Tell the bot what to do in natural language... e.g., 'Go forward 10 blocks and dig a hole' or 'Say hello and attack any nearby mobs'"
+                      className="w-full px-3 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                      rows={3}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Give instructions in plain English. The AI will translate them into bot commands.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => sendAiInstruction(selectedBotData.botId)}
+                    disabled={!aiInstruction.trim() || aiProcessing}
+                    className="w-full px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-md hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center"
+                  >
+                    {aiProcessing ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                        AI Processing...
+                      </>
+                    ) : (
+                      <>
+                        🧠 Execute AI Instruction
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* AI Results */}
+                {aiResults && (
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <h5 className="font-medium text-gray-900 mb-2">Execution Results</h5>
+                    {aiResults.success ? (
+                      <div className="space-y-3">
+                        <div className="text-sm">
+                          <span className="text-green-600 font-medium">✓ Success:</span>
+                          <span className="ml-2">Executed {aiResults.successfulCommands}/{aiResults.totalCommands} commands</span>
+                        </div>
+                        {aiResults.commands.map((cmd: any, index: number) => (
+                          <div key={index} className="text-xs bg-white p-2 rounded border">
+                            <div className="font-mono text-blue-600">
+                              {cmd.command} {JSON.stringify(cmd.args)}
+                            </div>
+                            <div className={`mt-1 ${cmd.result.success ? 'text-green-600' : 'text-red-600'}`}>
+                              {cmd.result.success ? '✓ Success' : `✗ ${cmd.result.error}`}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : aiResults.clarification ? (
+                      <div className="text-sm">
+                        <span className="text-yellow-600 font-medium">? Clarification needed:</span>
+                        <p className="mt-1 text-gray-700">{aiResults.clarification}</p>
+                      </div>
+                    ) : (
+                      <div className="text-sm">
+                        <span className="text-red-600 font-medium">✗ Error:</span>
+                        <span className="ml-2 text-gray-700">{aiResults.error}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Chat Control */}
             {selectedBotData.connected && (
               <div className="bg-white rounded-lg shadow-sm border p-6">
-                <h4 className="font-semibold text-gray-900 mb-4">Send Chat Message</h4>
+                <h4 className="font-semibold text-gray-900 mb-4">Quick Chat</h4>
                 <div className="flex space-x-3">
                   <input
                     type="text"
