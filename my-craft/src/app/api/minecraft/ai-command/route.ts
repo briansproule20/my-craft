@@ -3,6 +3,133 @@ import { botManager } from '@/lib/bot-manager';
 import { generateText } from 'ai';
 import { openai } from '@/echo';
 
+// Helper function for getting items - always tries creative first, then inventory
+async function getItemForPlacement(bot: any, blockName: string) {
+  console.log(`Looking for block: "${blockName}"`);
+  
+  // Always try creative mode first (works if creative, fails silently if not)
+  try {
+    const mcData = require('minecraft-data')(bot.version);
+    console.log(`Minecraft version: ${bot.version}`);
+    
+    // Try multiple name variations
+    const blockNameLower = blockName.toLowerCase();
+    const namespacedName = `minecraft:${blockNameLower}`;
+    
+    // Try exact matches with and without namespace
+    let blockType = mcData.blocksByName[blockNameLower] || 
+                   mcData.blocksByName[namespacedName] ||
+                   mcData.itemsByName[blockNameLower] ||
+                   mcData.itemsByName[namespacedName];
+    
+    if (!blockType) {
+      // Try partial matching (both ways)
+      blockType = Object.values(mcData.blocksByName).find((block: any) => 
+        block.name.includes(blockNameLower) ||
+        blockNameLower.includes(block.name) ||
+        block.name.includes(namespacedName) ||
+        namespacedName.includes(block.name)
+      ) || Object.values(mcData.itemsByName).find((item: any) => 
+        item.name.includes(blockNameLower) ||
+        blockNameLower.includes(item.name) ||
+        item.name.includes(namespacedName) ||
+        namespacedName.includes(item.name)
+      );
+    }
+    
+    console.log(`Found block type:`, blockType ? blockType.name : 'not found');
+    console.log(`Bot has creative API:`, !!bot.creative);
+    
+    if (blockType) {
+      console.log(`Found blockType:`, blockType);
+      
+      if (bot.creative) {
+        // Try to use creative inventory
+        console.log(`Attempting to set creative inventory slot 36 with ${blockType.name} (ID: ${blockType.id})`);
+        try {
+          await bot.creative.setInventorySlot(36, blockType, 64); // Try with more items
+          const creativeItem = bot.inventory.slots[36];
+          if (creativeItem) {
+            console.log(`✅ Got item from creative inventory: ${creativeItem.name}`);
+            return creativeItem;
+          } else {
+            console.log(`❌ Creative inventory slot 36 is empty after setting`);
+          }
+        } catch (creativeError) {
+          console.log(`Creative setInventorySlot failed:`, creativeError.message);
+        }
+      } else {
+        console.log(`No creative API available, but found blockType. Trying to create item manually...`);
+        
+        // Try to create the item directly in creative mode
+        try {
+          // In creative mode, we might be able to just create the item
+          const Item = require('prismarine-item')(bot.version);
+          const item = new Item(blockType.id, 1);
+          
+          // Try to put it in an empty slot
+          const emptySlot = bot.inventory.firstEmptySlotRange(36, 44); // Hotbar slots
+          if (emptySlot !== null) {
+            bot.inventory.slots[emptySlot] = item;
+            console.log(`✅ Manually created item in slot ${emptySlot}`);
+            return item;
+          }
+        } catch (manualError) {
+          console.log(`Manual item creation failed:`, manualError.message);
+        }
+      }
+    }
+  } catch (error) {
+    console.log('Creative inventory attempt failed:', error.message);
+  }
+  
+  // Fall back to searching existing inventory
+  console.log('Searching regular inventory...');
+  const inventoryItems = bot.inventory.items();
+  console.log('Available inventory items:', inventoryItems.map(i => i.name));
+  
+  const blockNameLower = blockName.toLowerCase();
+  const namespacedName = `minecraft:${blockNameLower}`;
+  
+  const foundItem = inventoryItems.find((item: any) => {
+    const itemNameLower = item.name.toLowerCase();
+    const itemDisplayLower = item.displayName?.toLowerCase() || '';
+    
+    return itemNameLower.includes(blockNameLower) || 
+           itemDisplayLower.includes(blockNameLower) ||
+           blockNameLower.includes(itemNameLower) ||
+           itemNameLower === namespacedName ||
+           itemNameLower.includes(namespacedName) ||
+           namespacedName.includes(itemNameLower);
+  });
+  
+  console.log(`Found in inventory:`, foundItem ? foundItem.name : 'not found');
+  
+  // Last resort: if we're in creative and found the block type, just fake it
+  if (!foundItem) {
+    console.log('Last resort: attempting to create basic blocks...');
+    try {
+      const mcData = require('minecraft-data')(bot.version);
+      const basicBlocks = ['stone', 'dirt', 'cobblestone', 'oak_planks', 'glass'];
+      
+      for (const basicBlock of basicBlocks) {
+        if (blockName.toLowerCase().includes(basicBlock) || basicBlock.includes(blockName.toLowerCase())) {
+          const blockType = mcData.blocksByName[basicBlock] || mcData.itemsByName[basicBlock];
+          if (blockType) {
+            console.log(`Creating basic block: ${basicBlock}`);
+            const Item = require('prismarine-item')(bot.version);
+            return new Item(blockType.id, 1);
+          }
+        }
+      }
+    } catch (lastResortError) {
+      console.log('Last resort failed:', lastResortError.message);
+    }
+  }
+  
+  return foundItem;
+}
+
 const MINECRAFT_COMMAND_SYSTEM_PROMPT = `You are a Minecraft bot command translator. Your job is to convert natural language instructions into a series of executable Minecraft bot commands.
 
 Available Commands:
@@ -13,11 +140,15 @@ Available Commands:
 - dig <x> <y> <z> - Dig single block at coordinates
 - digHere - Dig the block directly in front of the bot
 - digBelow - Dig the block directly below the bot
+- place <x> <y> <z> <blockName> - Place block at coordinates (works in Creative & Survival)
+- placeHere <blockName> - Place block in front of the bot (works in Creative & Survival)
+- placeBelow <blockName> - Place block below the bot (works in Creative & Survival)
 - moveTo <x> <y> <z> - Move to position then continue next command
 - lookAt <x> <y> <z> - Look at specific coordinates
-- place <x> <y> <z> <blockName> - Place block at coordinates
 - inventory - Check inventory
 - status - Get bot status
+
+Note: In Creative mode, bot has access to infinite inventory of all blocks and items.
 
 Rules:
 1. Convert user instructions into a JSON array of commands
@@ -51,6 +182,21 @@ Response: [
 
 User: "Dig that specific block"
 Response: [{"command": "dig", "args": {"x": "current.x + 2", "y": "current.y", "z": "current.z + 1"}}]
+
+User: "Place a stone block in front of you"
+Response: [{"command": "placeHere", "args": {"blockName": "stone"}}]
+
+User: "Build a wall with cobblestone"
+Response: [
+  {"command": "placeHere", "args": {"blockName": "cobblestone"}},
+  {"command": "moveTo", "args": {"x": "current.x + 1", "y": "current.y", "z": "current.z"}},
+  {"command": "placeHere", "args": {"blockName": "cobblestone"}},
+  {"command": "moveTo", "args": {"x": "current.x + 1", "y": "current.y", "z": "current.z"}},
+  {"command": "placeHere", "args": {"blockName": "cobblestone"}}
+]
+
+User: "Place dirt below your feet"
+Response: [{"command": "placeBelow", "args": {"blockName": "dirt"}}]
 
 Always respond with valid JSON array of commands, or ask for clarification if the instruction is ambiguous.`;
 
@@ -342,8 +488,191 @@ Convert this instruction into Minecraft bot commands:`;
             }
             break;
           case 'place':
-            // Place is complex and can crash bots, so keep it disabled for now
-            result = { success: false, error: 'Place command disabled - use dig and movement for now' };
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const Vec3 = require('vec3').Vec3;
+                const targetPos = new Vec3(
+                  Math.floor(processedArgs.x), 
+                  Math.floor(processedArgs.y), 
+                  Math.floor(processedArgs.z)
+                );
+                const blockName = processedArgs.blockName || processedArgs.block;
+                
+                if (!blockName) {
+                  result = { success: false, error: 'Block name required for place command' };
+                  break;
+                }
+                
+                // Get the item (handles both creative and survival mode)
+                const item = await getItemForPlacement(bot.bot, blockName);
+                
+                if (!item) {
+                  const availableItems = bot.bot.inventory.items().map(i => i.name).join(', ');
+                  result = { success: false, error: `Block '${blockName}' not found. Available in inventory: ${availableItems}` };
+                  break;
+                }
+                
+                // Note: Removed position checking - allow building on top of existing blocks
+                
+                // Equip the item
+                await bot.bot.equip(item, 'hand');
+                
+                // Find a reference block to place against (check all adjacent positions)
+                let referenceBlock = null;
+                let faceVector = null;
+                
+                const adjacentOffsets = [
+                  { offset: [0, -1, 0], face: [0, 1, 0] },  // Below -> place on top
+                  { offset: [1, 0, 0], face: [-1, 0, 0] },  // East -> place on west face
+                  { offset: [-1, 0, 0], face: [1, 0, 0] },  // West -> place on east face
+                  { offset: [0, 0, 1], face: [0, 0, -1] },  // South -> place on north face
+                  { offset: [0, 0, -1], face: [0, 0, 1] },  // North -> place on south face
+                  { offset: [0, 1, 0], face: [0, -1, 0] }   // Above -> place on bottom
+                ];
+                
+                for (const { offset, face } of adjacentOffsets) {
+                  const checkPos = targetPos.offset(offset[0], offset[1], offset[2]);
+                  const checkBlock = bot.bot.blockAt(checkPos);
+                  
+                  if (checkBlock && checkBlock.name !== 'air') {
+                    referenceBlock = checkBlock;
+                    faceVector = new Vec3(face[0], face[1], face[2]);
+                    break;
+                  }
+                }
+                
+                if (!referenceBlock) {
+                  result = { success: false, error: 'No adjacent block found to place against' };
+                  break;
+                }
+                
+                // Place the block
+                await bot.bot.placeBlock(referenceBlock, faceVector);
+                result = { success: true, data: { 
+                  block: blockName, 
+                  position: targetPos,
+                  placedAgainst: referenceBlock.name,
+                  itemUsed: item.name
+                } };
+                
+              } else {
+                result = { success: false, error: 'Bot not available or disconnected' };
+              }
+            } catch (error) {
+              result = { success: false, error: `Place failed: ${(error as Error).message}` };
+            }
+            break;
+          case 'placeHere':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const pos = bot.bot.entity.position;
+                const yaw = bot.bot.entity.yaw;
+                const blockName = processedArgs.blockName || processedArgs.block;
+                
+                if (!blockName) {
+                  result = { success: false, error: 'Block name required for placeHere command' };
+                  break;
+                }
+                
+                // Calculate position in front of bot
+                const dx = -Math.sin(yaw);
+                const dz = -Math.cos(yaw);
+                const targetPos = {
+                  x: Math.floor(pos.x + dx), 
+                  y: Math.floor(pos.y), 
+                  z: Math.floor(pos.z + dz)
+                };
+                
+                // Simple placement like dig commands
+                const Vec3 = require('vec3').Vec3;
+                const targetVec3 = new Vec3(targetPos.x, targetPos.y, targetPos.z);
+                
+                // Find item in inventory with namespace handling
+                const blockNameLower = blockName.toLowerCase();
+                const namespacedName = `minecraft:${blockNameLower}`;
+                
+                const item = bot.bot.inventory.items().find(item => {
+                  const itemNameLower = item.name.toLowerCase();
+                  const itemDisplayLower = item.displayName?.toLowerCase() || '';
+                  
+                  return itemNameLower.includes(blockNameLower) || 
+                         itemDisplayLower.includes(blockNameLower) ||
+                         blockNameLower.includes(itemNameLower) ||
+                         itemNameLower === namespacedName ||
+                         itemNameLower.includes(namespacedName) ||
+                         namespacedName.includes(itemNameLower);
+                });
+                
+                if (!item) {
+                  const available = bot.bot.inventory.items().map(i => i.name).join(', ');
+                  result = { success: false, error: `Block '${blockName}' not found. Available: ${available}` };
+                  break;
+                }
+                
+                // Equip and place (simple like dig)
+                await bot.bot.equip(item, 'hand');
+                
+                // Find ground to place on
+                const groundBlock = bot.bot.blockAt(targetVec3.offset(0, -1, 0));
+                if (groundBlock && groundBlock.name !== 'air') {
+                  await bot.bot.placeBlock(groundBlock, new Vec3(0, 1, 0));
+                  result = { success: true, data: { block: blockName, position: targetPos } };
+                } else {
+                  result = { success: false, error: 'No ground to place on' };
+                }
+                
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: `PlaceHere failed: ${(error as Error).message}` };
+            }
+            break;
+          case 'placeBelow':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const pos = bot.bot.entity.position;
+                const blockName = processedArgs.blockName || processedArgs.block;
+                
+                if (!blockName) {
+                  result = { success: false, error: 'Block name required for placeBelow command' };
+                  break;
+                }
+                
+                const Vec3 = require('vec3').Vec3;
+                const targetPos = new Vec3(Math.floor(pos.x), Math.floor(pos.y - 1), Math.floor(pos.z));
+                
+                // Allow building on top of existing blocks
+                
+                const item = await getItemForPlacement(bot.bot, blockName);
+                
+                if (!item) {
+                  result = { success: false, error: `Block '${blockName}' not found` };
+                  break;
+                }
+                
+                await bot.bot.equip(item, 'hand');
+                
+                // Try to place against an adjacent block
+                const adjacentBlock = bot.bot.blockAt(targetPos.offset(0, -1, 0)) ||
+                                    bot.bot.blockAt(targetPos.offset(1, 0, 0)) ||
+                                    bot.bot.blockAt(targetPos.offset(-1, 0, 0)) ||
+                                    bot.bot.blockAt(targetPos.offset(0, 0, 1)) ||
+                                    bot.bot.blockAt(targetPos.offset(0, 0, -1));
+                
+                if (adjacentBlock && adjacentBlock.name !== 'air') {
+                  await bot.bot.placeBlock(adjacentBlock, new Vec3(0, 1, 0));
+                  result = { success: true, data: { block: blockName, position: targetPos, placedBelow: true } };
+                } else {
+                  result = { success: false, error: 'No adjacent block found to place against' };
+                }
+                
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: `PlaceBelow failed: ${(error as Error).message}` };
+            }
             break;
           case 'inventory':
             try {
@@ -366,19 +695,29 @@ Convert this instruction into Minecraft bot commands:`;
             try {
               if (bot.bot && !bot.bot.ended) {
                 const pos = bot.bot.entity.position;
+                const gameMode = bot.bot.game.gameMode;
+                const gameModeNames = {
+                  0: 'Survival',
+                  1: 'Creative', 
+                  2: 'Adventure',
+                  3: 'Spectator'
+                };
+                
                 const status = {
                   position: { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) },
                   health: bot.bot.health,
                   food: bot.bot.food,
                   experience: bot.bot.experience,
-                  gameMode: bot.bot.game.gameMode,
+                  gameMode: gameMode,
+                  gameModeName: gameModeNames[gameMode] || `Unknown (${gameMode})`,
                   dimension: bot.bot.game.dimension,
                   time: bot.bot.time.timeOfDay,
                   weather: {
                     raining: bot.bot.isRaining,
                     thundering: bot.bot.thunderState > 0
                   },
-                  inventorySlots: bot.bot.inventory.items().length
+                  inventorySlots: bot.bot.inventory.items().length,
+                  hasCreativeInventory: !!bot.bot.creative
                 };
                 result = { success: true, data: status };
               } else {

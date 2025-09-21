@@ -244,6 +244,73 @@ class BotManager {
       return { success: false, error: (error as Error).message };
     }
   }
+
+  async placeBlock(botId: string, x: number, y: number, z: number, blockName: string): Promise<{ success: boolean; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot || !managedBot.bot) {
+      return { success: false, error: 'Bot not found or not connected' };
+    }
+
+    try {
+      const bot = managedBot.bot;
+      const targetPos = new Vec3(Math.floor(x), Math.floor(y), Math.floor(z));
+      
+      // Find item in inventory
+      const item = bot.inventory.items().find(item => 
+        item.name.toLowerCase().includes(blockName.toLowerCase()) ||
+        item.displayName?.toLowerCase().includes(blockName.toLowerCase())
+      );
+
+      if (!item) {
+        return { success: false, error: `Block '${blockName}' not found in inventory` };
+      }
+
+      // Equip the item
+      await bot.equip(item, 'hand');
+
+      // Find a reference block to place against
+      const referenceBlock = bot.blockAt(targetPos.offset(0, -1, 0)) || // Below
+                           bot.blockAt(targetPos.offset(1, 0, 0)) ||   // East
+                           bot.blockAt(targetPos.offset(-1, 0, 0)) ||  // West
+                           bot.blockAt(targetPos.offset(0, 0, 1)) ||   // South
+                           bot.blockAt(targetPos.offset(0, 0, -1));    // North
+
+      if (!referenceBlock || referenceBlock.name === 'air') {
+        return { success: false, error: 'No adjacent block to place against' };
+      }
+
+      // Calculate face vector
+      const diff = targetPos.minus(referenceBlock.position);
+      const faceVector = new Vec3(diff.x, diff.y, diff.z);
+
+      await bot.placeBlock(referenceBlock, faceVector);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  async digBlock(botId: string, x: number, y: number, z: number): Promise<{ success: boolean; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot || !managedBot.bot) {
+      return { success: false, error: 'Bot not found or not connected' };
+    }
+
+    try {
+      const bot = managedBot.bot;
+      const targetPos = new Vec3(Math.floor(x), Math.floor(y), Math.floor(z));
+      const block = bot.blockAt(targetPos);
+
+      if (!block || block.name === 'air') {
+        return { success: false, error: 'No block to dig at that location' };
+      }
+
+      await bot.dig(block);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
 }
 
 // Singleton instance
