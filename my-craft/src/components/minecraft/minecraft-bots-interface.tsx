@@ -184,6 +184,7 @@ export default function MinecraftBotsInterface() {
 
 interface ConnectBotFormProps {
   onStart: (config: { host: string; port: number; username: string }) => void;
+  onStartIntelligent: (config: { host: string; port: number; username: string }) => void;
   loading: boolean;
 }
 

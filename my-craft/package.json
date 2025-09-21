@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "biome check --write"
+    "lint": "biome check --write",
+    "intelligence": "node mindcraft-service.js",
+    "dev:full": "concurrently \"pnpm dev\" \"pnpm intelligence\""
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.26",

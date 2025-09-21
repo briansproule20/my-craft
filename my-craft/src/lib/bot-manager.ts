@@ -4,6 +4,7 @@ import { loader as autoEat } from 'mineflayer-auto-eat';
 import { plugin as collectBlock } from 'mineflayer-collectblock';
 import { v4 as uuidv4 } from 'uuid';
 import { Vec3 } from 'vec3';
+// MindCraft integration will be loaded dynamically to avoid import issues
 
 export interface BotConfig {
   host: string;
@@ -21,17 +22,22 @@ export interface ManagedBot {
   createdAt: Date;
   lastActivity: Date;
   eventListeners: Array<{ event: string; listener: Function }>;
+  memory: Map<string, any>; // Simple memory system
+  goals: string[]; // Current goals/objectives
+  lastScreenshot?: string; // Base64 screenshot data
+  worldObservations: string[]; // What the bot has observed
 }
 
 class BotManager {
   private bots: Map<string, ManagedBot> = new Map();
   private eventHandlers: Map<string, Set<Function>> = new Map();
+  private mindcraftInitialized = false;
 
   async startBot(config: BotConfig): Promise<{ success: boolean; botId?: string; error?: string }> {
     try {
       const botId = uuidv4();
 
-      // Create managed bot entry
+      // Create managed bot entry with built-in intelligence
       const managedBot: ManagedBot = {
         id: botId,
         bot: null,
@@ -39,7 +45,10 @@ class BotManager {
         serverInfo: config,
         createdAt: new Date(),
         lastActivity: new Date(),
-        eventListeners: []
+        eventListeners: [],
+        memory: new Map(), // Built-in memory system
+        goals: [], // Current objectives
+        worldObservations: [] // What the bot observes
       };
 
       this.bots.set(botId, managedBot);
@@ -69,6 +78,9 @@ class BotManager {
       bot.loadPlugin(collectBlock);
 
       managedBot.bot = bot;
+
+      // All bots now have built-in intelligence
+      console.log(`✅ Bot ${botId} created with built-in memory and goal system`);
 
       // Set up event listeners
       this.setupBotEvents(botId, bot);
@@ -307,6 +319,131 @@ class BotManager {
 
       await bot.dig(block);
       return { success: true };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  // Built-in intelligence methods (no external services)
+  async addMemory(botId: string, key: string, value: any): Promise<{ success: boolean; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot) {
+      return { success: false, error: 'Bot not found' };
+    }
+
+    managedBot.memory.set(key, value);
+    managedBot.lastActivity = new Date();
+    return { success: true };
+  }
+
+  async getMemory(botId: string, key?: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot) {
+      return { success: false, error: 'Bot not found' };
+    }
+
+    if (key) {
+      return { success: true, data: managedBot.memory.get(key) };
+    } else {
+      // Return all memories as object
+      const allMemories = Object.fromEntries(managedBot.memory);
+      return { success: true, data: allMemories };
+    }
+  }
+
+  async addGoal(botId: string, goal: string): Promise<{ success: boolean; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot) {
+      return { success: false, error: 'Bot not found' };
+    }
+
+    managedBot.goals.push(goal);
+    managedBot.lastActivity = new Date();
+    console.log(`Goal added to bot ${botId}: ${goal}`);
+    return { success: true };
+  }
+
+  async getGoals(botId: string): Promise<{ success: boolean; data?: string[]; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot) {
+      return { success: false, error: 'Bot not found' };
+    }
+
+    return { success: true, data: managedBot.goals };
+  }
+
+  async completeGoal(botId: string, goalIndex: number): Promise<{ success: boolean; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot) {
+      return { success: false, error: 'Bot not found' };
+    }
+
+    if (goalIndex >= 0 && goalIndex < managedBot.goals.length) {
+      const completedGoal = managedBot.goals.splice(goalIndex, 1)[0];
+      managedBot.memory.set(`completed_goal_${Date.now()}`, completedGoal);
+      console.log(`Goal completed by bot ${botId}: ${completedGoal}`);
+      return { success: true };
+    } else {
+      return { success: false, error: 'Invalid goal index' };
+    }
+  }
+
+  // Simple vision system (observes nearby blocks and entities)
+  async observeWorld(botId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    const managedBot = this.bots.get(botId);
+    if (!managedBot || !managedBot.bot) {
+      return { success: false, error: 'Bot not found or not connected' };
+    }
+
+    try {
+      const bot = managedBot.bot;
+      const pos = bot.entity.position;
+      
+      // Observe nearby blocks
+      const nearbyBlocks = [];
+      for (let x = -3; x <= 3; x++) {
+        for (let y = -2; y <= 2; y++) {
+          for (let z = -3; z <= 3; z++) {
+            const blockPos = new Vec3(Math.floor(pos.x + x), Math.floor(pos.y + y), Math.floor(pos.z + z));
+            const block = bot.blockAt(blockPos);
+            if (block && block.name !== 'air') {
+              nearbyBlocks.push({
+                name: block.name,
+                position: { x: blockPos.x, y: blockPos.y, z: blockPos.z },
+                distance: Math.sqrt(x*x + y*y + z*z)
+              });
+            }
+          }
+        }
+      }
+
+      // Observe nearby entities
+      const nearbyEntities = Object.values(bot.entities || {})
+        .filter(entity => entity && entity.position && entity.position.distanceTo(pos) < 10)
+        .map(entity => ({
+          name: entity.name || entity.type,
+          type: entity.type,
+          position: entity.position,
+          distance: entity.position.distanceTo(pos)
+        }));
+
+      const observation = {
+        timestamp: new Date().toISOString(),
+        botPosition: { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) },
+        nearbyBlocks: nearbyBlocks.slice(0, 20), // Limit to prevent spam
+        nearbyEntities,
+        inventory: bot.inventory.items().map(item => ({ name: item.name, count: item.count })),
+        health: bot.health,
+        food: bot.food
+      };
+
+      // Store observation in memory
+      managedBot.worldObservations.push(`Observed at ${observation.timestamp}: ${nearbyBlocks.length} blocks, ${nearbyEntities.length} entities nearby`);
+      if (managedBot.worldObservations.length > 10) {
+        managedBot.worldObservations.shift(); // Keep only last 10 observations
+      }
+
+      return { success: true, data: observation };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }

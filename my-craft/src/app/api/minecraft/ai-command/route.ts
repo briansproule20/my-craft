@@ -140,15 +140,16 @@ Available Commands:
 - dig <x> <y> <z> - Dig single block at coordinates
 - digHere - Dig the block directly in front of the bot
 - digBelow - Dig the block directly below the bot
-- place <x> <y> <z> <blockName> - Place block at coordinates (works in Creative & Survival)
-- placeHere <blockName> - Place block in front of the bot (works in Creative & Survival)
-- placeBelow <blockName> - Place block below the bot (works in Creative & Survival)
+- place <x> <y> <z> <blockName> - Place block at coordinates
+- placeHere <blockName> - Place block in front of the bot
+- placeBelow <blockName> - Place block below the bot
 - moveTo <x> <y> <z> - Move to position then continue next command
 - lookAt <x> <y> <z> - Look at specific coordinates
+- observe - Look around and describe what the bot sees nearby
+- remember <key> <value> - Store information in bot's memory
+- recall <key> - Retrieve information from bot's memory
 - inventory - Check inventory
 - status - Get bot status
-
-Note: In Creative mode, bot has access to infinite inventory of all blocks and items.
 
 Rules:
 1. Convert user instructions into a JSON array of commands
@@ -722,6 +723,52 @@ Convert this instruction into Minecraft bot commands:`;
                 result = { success: true, data: status };
               } else {
                 result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: (error as Error).message };
+            }
+            break;
+          case 'observe':
+            try {
+              if (bot.bot && !bot.bot.ended) {
+                const observeResult = await botManager.observeWorld(botId);
+                if (observeResult.success) {
+                  const obs = observeResult.data;
+                  const description = `I can see ${obs.nearbyBlocks.length} blocks nearby including: ${obs.nearbyBlocks.slice(0,5).map(b => b.name).join(', ')}. ${obs.nearbyEntities.length} entities nearby. My inventory has: ${obs.inventory.map(i => `${i.count} ${i.name}`).join(', ')}.`;
+                  result = { success: true, data: { observation: description, details: obs } };
+                } else {
+                  result = observeResult;
+                }
+              } else {
+                result = { success: false, error: 'Bot not available' };
+              }
+            } catch (error) {
+              result = { success: false, error: (error as Error).message };
+            }
+            break;
+          case 'remember':
+            try {
+              const key = processedArgs.key;
+              const value = processedArgs.value;
+              if (key && value) {
+                const memResult = await botManager.addMemory(botId, key, value);
+                result = memResult.success ? { success: true, data: { remembered: key } } : memResult;
+              } else {
+                result = { success: false, error: 'Key and value required for remember command' };
+              }
+            } catch (error) {
+              result = { success: false, error: (error as Error).message };
+            }
+            break;
+          case 'recall':
+            try {
+              const key = processedArgs.key;
+              if (key) {
+                const memResult = await botManager.getMemory(botId, key);
+                result = memResult.success ? { success: true, data: { recalled: key, value: memResult.data } } : memResult;
+              } else {
+                const allMem = await botManager.getMemory(botId);
+                result = allMem.success ? { success: true, data: { allMemories: allMem.data } } : allMem;
               }
             } catch (error) {
               result = { success: false, error: (error as Error).message };
