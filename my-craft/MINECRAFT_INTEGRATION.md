@@ -1,3 +1,4 @@
+
 # Minecraft Bot Integration
 
 This project integrates mineflayer and mindcraft to create a web-based interface for controlling Minecraft bots using AI.

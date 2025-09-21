@@ -45,12 +45,22 @@ class BotManager {
       this.bots.set(botId, managedBot);
 
       // Create the bot
+      console.log(`Creating bot with config:`, {
+        host: config.host,
+        port: config.port,
+        username: config.username,
+        version: config.version || '1.21.1'
+      });
+
       const bot = mineflayer.createBot({
         host: config.host,
         port: config.port,
         username: config.username,
         password: config.password,
-        version: config.version || '1.21.1'
+        version: config.version || '1.21.1',
+        auth: 'offline',  // Force offline mode
+        timeout: 30000,   // 30 second timeout
+        skipValidation: true  // Skip protocol validation
       });
 
       // Load plugins
@@ -126,7 +136,12 @@ class BotManager {
           console.error(`Bot ${botId} error:`, err);
           managedBot.status = 'error';
           managedBot.lastActivity = new Date();
-          this.emitEvent('bot:error', { botId, error: err.message });
+
+          // Store the error message for the UI
+          const errorMessage = err.message || err.toString();
+          (managedBot as any).lastError = errorMessage;
+
+          this.emitEvent('bot:error', { botId, error: errorMessage });
         }
       },
       {
