@@ -50,9 +50,9 @@ const models = [
 ];
 
 const suggestions = [
-  'Can you explain how to play tennis?',
-  'Write me a code snippet of how to use the vercel ai sdk to create a chatbot',
-  'How do I make a really good fish taco?',
+  'How do I build an efficient mob farm in Minecraft?',
+  'What are the best enchantments for a diamond sword?',
+  'Can you explain how to set up a redstone clock circuit?',
 ];
 
 const ChatBotDemo = () => {
