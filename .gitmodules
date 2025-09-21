@@ -1,0 +1,6 @@
+[submodule "my-craft/mindcraft"]
+	path = my-craft/mindcraft
+	url = https://github.com/mindcraft-bots/mindcraft.git
+[submodule "my-craft/mineflayer"]
+	path = my-craft/mineflayer
+	url = https://github.com/PrismarineJS/mineflayer.git
